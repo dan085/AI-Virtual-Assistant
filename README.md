@@ -128,14 +128,61 @@ Firestore, and Functions emulators automatically (see
 
 ### 6. Deploy
 
-```bash
-# Functions + Firestore rules
-firebase deploy --only functions,firestore
+The hosting target is wired with **predeploy** and **postdeploy** hooks in
+`firebase.json`, so a single command builds Angular, deploys it, and then
+smoke-tests the live URL:
 
-# Frontend
-cd web && npm run build && cd ..
+```bash
+# Deploys everything (functions + firestore + hosting)
+firebase deploy
+
+# Or just the frontend — predeploy will install deps and build Angular,
+# postdeploy will verify the URL and hit /api/health.
 firebase deploy --only hosting
 ```
+
+What happens automatically during `firebase deploy --only hosting`:
+
+1. **predeploy** → `npm ci` in `web/` then `npm run build -- --configuration=production`
+2. Firebase uploads `web/dist/web/browser` and updates routing rules
+3. **postdeploy** → `node scripts/postdeploy.js` runs and:
+   - Resolves the hosting URL from `.firebaserc` / Firebase CLI
+   - Sends `GET /` and `GET /api/health` as a smoke test
+   - Optionally POSTs a Slack/Discord-compatible payload to
+     `DEPLOY_WEBHOOK_URL` if that env var is set
+   - Exits non-zero if the root URL is not reachable
+
+Convenience npm scripts (root `package.json`):
+
+```bash
+npm run install:all        # install web + functions deps
+npm run build              # build both
+npm run deploy             # firebase deploy
+npm run deploy:hosting     # predeploy builds, postdeploy verifies
+npm run emulators          # firebase emulators:start
+npm run postdeploy:verify  # run the smoke test manually
+```
+
+### 7. Continuous deployment (GitHub Actions)
+
+`.github/workflows/firebase-deploy.yml` runs on every push and PR:
+
+- **Every PR** → builds web + functions, lints, and deploys to a
+  **preview channel** that expires in 7 days. The channel URL is posted
+  back on the PR automatically.
+- **Push to `main`** → builds, deploys Firestore rules + Functions, then
+  deploys Hosting (which triggers the postdeploy smoke test).
+
+Required GitHub repository secrets:
+
+| Secret | What it is |
+| --- | --- |
+| `FIREBASE_SERVICE_ACCOUNT` | JSON of a **new** service account with `Firebase Hosting Admin` + `Cloud Functions Developer` + `Firebase Rules Admin` roles. **Never reuse a key you pasted anywhere in plaintext.** |
+| `FIREBASE_PROJECT_ID` | e.g. `your-firebase-project-id` |
+| `GEMINI_API_KEY` | for Functions runtime |
+| `INSTAGRAM_ACCESS_TOKEN` | long-lived IG Graph token |
+| `INSTAGRAM_BUSINESS_ID` | IG Business account id |
+| `DEPLOY_WEBHOOK_URL` | *(optional)* Slack/Discord webhook URL for post-deploy notifications |
 
 ## Features
 
