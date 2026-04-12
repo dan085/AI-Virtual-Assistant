@@ -22,6 +22,10 @@
     ],
     "rewrites": [
       {
+        "source": "/api/oauth/**",
+        "function": "oauthCallback"
+      },
+      {
         "source": "/api/**",
         "function": "api"
       },

@@ -18,6 +18,7 @@ import { AuthService } from './core/auth.service';
             <a routerLink="/agents" routerLinkActive="active">Agents</a>
             <a routerLink="/chat" routerLinkActive="active">Chat</a>
             <a routerLink="/instagram" routerLinkActive="active">Instagram</a>
+            <a routerLink="/connections" routerLinkActive="active">Connections</a>
           </nav>
           <button class="signout" (click)="auth.signOut()">Sign out</button>
         } @else {

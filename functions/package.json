@@ -16,7 +16,10 @@
     "deploy": "firebase deploy --only functions",
     "logs": "firebase functions:log",
     "seed:agents": "npm run build && node lib/seed/seed-agents.js",
-    "seed:agents:emulator": "npm run build && FIRESTORE_EMULATOR_HOST=localhost:8080 node lib/seed/seed-agents.js"
+    "seed:agents:emulator": "npm run build && FIRESTORE_EMULATOR_HOST=localhost:8080 node lib/seed/seed-agents.js",
+    "seed:pricing": "npm run build && node lib/seed/seed-pricing.js",
+    "seed:pricing:emulator": "npm run build && FIRESTORE_EMULATOR_HOST=localhost:8080 node lib/seed/seed-pricing.js",
+    "seed:all": "npm run seed:agents && npm run seed:pricing"
   },
   "dependencies": {
     "firebase-admin": "^12.6.0",

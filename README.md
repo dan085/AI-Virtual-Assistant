@@ -200,6 +200,123 @@ Required GitHub repository secrets:
 - Writes to `users/{uid}/instagramPosts/{postId}`
 - Image URL must be publicly reachable (Firebase Storage signed URLs work)
 
+## Multi-platform social publishing
+
+The platform supports per-user OAuth connections to multiple social
+networks. Each user logs in with their own account and the AI agent
+publishes on their behalf using the stored tokens.
+
+Supported platforms:
+
+| Platform | OAuth flow | Media types |
+| --- | --- | --- |
+| Instagram | Facebook Login → Page token → IG Business id | photo, feed video, Reel, Story, carousel |
+| Twitter / X | OAuth 2.0 + PKCE | text tweets, images (TODO) |
+| TikTok | TikTok Login Kit | videos (upload to drafts by default) |
+
+### Architecture
+
+- **Platform adapters**: `functions/src/social/platforms/*.ts` implement
+  `SocialPlatform` interface (buildAuthorizeUrl / handleCallback / publish).
+- **OAuth state**: signed with an HMAC using
+  `SOCIAL_OAUTH_SIGNING_SECRET`, embeds the user uid so the callback
+  knows who authorized.
+- **Token storage**: `users/{uid}/socialAccounts/{platformId}` —
+  **client-read-denied** via Firestore rules. The frontend gets a
+  scrubbed summary via the `listSocialConnections` callable, never the
+  raw tokens.
+- **OAuth callback**: `oauthCallback` HTTP function mounted at
+  `/api/oauth/{platform}/callback` via Hosting rewrites.
+
+### Setting up each platform
+
+#### Instagram (Meta)
+
+1. Create a Meta App at https://developers.facebook.com/apps/
+2. Add the **Facebook Login** product.
+3. Add **Instagram Graph API** product.
+4. In Facebook Login → Settings → Valid OAuth Redirect URIs, add:
+   `https://<your-project>.web.app/api/oauth/instagram/callback`
+5. Required permissions: `instagram_basic`, `instagram_content_publish`,
+   `pages_show_list`, `pages_read_engagement`, `business_management`.
+6. Copy the App ID and App Secret:
+   ```bash
+   firebase functions:secrets:set META_APP_ID
+   firebase functions:secrets:set META_APP_SECRET
+   ```
+7. The user must have a Facebook Page with a linked Instagram Business
+   account (not a personal IG).
+
+#### Twitter / X
+
+1. Create an app at https://developer.x.com/en/portal/dashboard
+2. Enable **OAuth 2.0** with confidential client.
+3. Set the redirect URI:
+   `https://<your-project>.web.app/api/oauth/twitter/callback`
+4. Required scopes: `tweet.read`, `tweet.write`, `users.read`,
+   `offline.access`.
+5. Set the secrets:
+   ```bash
+   firebase functions:secrets:set TWITTER_CLIENT_ID
+   firebase functions:secrets:set TWITTER_CLIENT_SECRET
+   ```
+
+#### TikTok
+
+**Important**: TikTok's Content Posting API has two tiers:
+
+- **Upload to inbox / drafts** — available to any approved app. Videos
+  land in the user's TikTok drafts and they manually finalize.
+- **Direct post** — requires additional review by TikTok. Until
+  approved, videos go to drafts.
+
+Steps:
+
+1. Create a developer account at https://developers.tiktok.com/
+2. Register an app at https://developers.tiktok.com/apps
+3. Add these **products** to your app:
+   - **Login Kit for Web**
+   - **Content Posting API**
+4. In the app settings, add the redirect URI:
+   `https://<your-project>.web.app/api/oauth/tiktok/callback`
+5. Required scopes:
+   - `user.info.basic`
+   - `video.upload` (upload to drafts — usually granted immediately)
+   - `video.publish` (direct post — requires review)
+6. Copy the **Client Key** and **Client Secret** from the app page:
+   ```bash
+   firebase functions:secrets:set TIKTOK_CLIENT_KEY
+   firebase functions:secrets:set TIKTOK_CLIENT_SECRET
+   ```
+7. Submit the app for review when you're ready to go to production.
+   Until then, the scaffold defaults to `privacy_level: SELF_ONLY` so
+   test posts never appear publicly.
+
+Docs:
+- https://developers.tiktok.com/doc/login-kit-web
+- https://developers.tiktok.com/doc/content-posting-api-get-started
+
+#### OAuth signing secret
+
+Generate a random high-entropy value (used to HMAC the state parameter):
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))" | \
+  firebase functions:secrets:set SOCIAL_OAUTH_SIGNING_SECRET --data-file=-
+```
+
+### Using the AI agent for multi-platform posts
+
+1. The user visits `/connections` and clicks **Connect Instagram** /
+   **Connect Twitter** / **Connect TikTok**. Each button redirects to
+   the platform's OAuth consent screen and back.
+2. Tokens are stored in `users/{uid}/socialAccounts/{platformId}`.
+3. The AI agent (Nina or any agent with the right skills) drafts
+   content and can invoke `publishToSocial` with
+   `{ platform, mediaType, … }` — or the user can publish from the UI.
+4. The `oauthCallback` HTTP function handles the return leg of every
+   platform's OAuth flow uniformly.
+
 ## Agents & Skills
 
 The platform ships with a small registry of **agents** (personas) and

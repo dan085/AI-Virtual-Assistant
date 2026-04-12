@@ -24,29 +24,58 @@ service cloud.firestore {
         }
       }
 
-      // Instagram posts (drafts + published) created by the user OR the agent
+      // Instagram posts (drafts + published) — agent or user created.
       match /instagramPosts/{postId} {
         allow read, write: if isOwner(userId);
       }
 
-      // Reminders (created via the createReminder skill or directly)
+      // Reminders — writes by user or agent (Admin SDK bypasses rules).
       match /reminders/{reminderId} {
         allow read, write: if isOwner(userId);
       }
 
-      // Personal knowledge base searchable by the agent
+      // Personal knowledge base searchable by the agent.
       match /knowledge/{docId} {
         allow read, write: if isOwner(userId);
       }
+
+      // Service tickets (DrPineapple workflow).
+      match /tickets/{ticketId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // AI video generation jobs.
+      match /videoGenerations/{jobId} {
+        allow read: if isOwner(userId);
+        // Writes happen via Cloud Functions with the Admin SDK.
+        allow write: if false;
+      }
+
+      // Notifications (delivered reminders, etc.).
+      match /notifications/{notifId} {
+        allow read, update: if isOwner(userId);
+        allow create, delete: if false;
+      }
+
+      // Connected social accounts — OAuth tokens live here.
+      // Clients can READ metadata only if we strip secrets (see below),
+      // but to be safe we deny all client access and force reads through
+      // the `listSocialConnections` callable, which returns a scrubbed
+      // payload.
+      match /socialAccounts/{platformId} {
+        allow read, write: if false;
+      }
     }
 
-    // -------- Agent catalog (public read, functions-only write) --------
+    // -------- Agent catalog (signed-in read, functions-only write) --------
     match /agents/{agentId} {
-      // Any signed-in user can list/read the agent catalog to populate
-      // the agent picker.
       allow read: if isSignedIn();
-      // Writes happen via the seed script or an admin using the Admin SDK,
-      // which bypasses these rules. Clients cannot modify agents.
+      allow write: if false;
+    }
+
+    // -------- Public service pricing catalog (read-only to all signed in) --
+    match /servicePricing/{pricingId} {
+      allow read: if isSignedIn();
       allow write: if false;
     }
 
