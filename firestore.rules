@@ -3,20 +3,19 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Helper functions
+    // -------- Helpers --------
     function isSignedIn() {
       return request.auth != null;
     }
-
     function isOwner(userId) {
       return isSignedIn() && request.auth.uid == userId;
     }
 
-    // Per-user profile
+    // -------- Per-user data --------
     match /users/{userId} {
       allow read, write: if isOwner(userId);
 
-      // Chat conversations owned by the user
+      // Chat conversations
       match /conversations/{conversationId} {
         allow read, write: if isOwner(userId);
 
@@ -25,19 +24,33 @@ service cloud.firestore {
         }
       }
 
-      // Instagram posts drafted/scheduled by the user
+      // Instagram posts (drafts + published) created by the user OR the agent
       match /instagramPosts/{postId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // Reminders (created via the createReminder skill or directly)
+      match /reminders/{reminderId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // Personal knowledge base searchable by the agent
+      match /knowledge/{docId} {
         allow read, write: if isOwner(userId);
       }
     }
 
-    // Public agent definitions (read-only to clients; writes via Functions)
+    // -------- Agent catalog (public read, functions-only write) --------
     match /agents/{agentId} {
+      // Any signed-in user can list/read the agent catalog to populate
+      // the agent picker.
       allow read: if isSignedIn();
+      // Writes happen via the seed script or an admin using the Admin SDK,
+      // which bypasses these rules. Clients cannot modify agents.
       allow write: if false;
     }
 
-    // Default deny
+    // -------- Default deny --------
     match /{document=**} {
       allow read, write: if false;
     }

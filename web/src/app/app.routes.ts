@@ -11,6 +11,12 @@ export const routes: Routes = [
     canActivate: [authGuard],
   },
   {
+    path: 'agents',
+    loadComponent: () =>
+      import('./features/agents/agents.component').then((m) => m.AgentsComponent),
+    canActivate: [authGuard],
+  },
+  {
     path: 'chat',
     loadComponent: () =>
       import('./features/chat/chat.component').then((m) => m.ChatComponent),

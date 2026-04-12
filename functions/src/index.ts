@@ -2,8 +2,9 @@ import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { setGlobalOptions } from 'firebase-functions/v2';
 import { getAdminApp } from './lib/admin';
 import { requireAuth, wrapError } from './lib/errors';
-import { ChatRequestSchema, runAgent } from './agent/agent';
+import { ChatRequestSchema, listAgents, runAgent } from './agent/agent';
 import { GEMINI_API_KEY } from './agent/genkit';
+import { SKILL_CATALOG } from './agent/tools';
 import {
   PublishRequestSchema,
   publishInstagramPost,
@@ -64,6 +65,26 @@ export const publishToInstagram = onCall(
       return await publishInstagramPost(uid, parsed.data);
     } catch (err) {
       wrapError(err, 'Instagram publish failed');
+    }
+  },
+);
+
+/**
+ * Callable function: list the agents the user can pick from, together
+ * with their skill catalog. Used by the frontend agent picker.
+ */
+export const listAvailableAgents = onCall(
+  { timeoutSeconds: 20, memory: '256MiB' },
+  async (request) => {
+    requireAuth(request.auth);
+    try {
+      const agents = await listAgents();
+      return {
+        agents,
+        skills: Object.values(SKILL_CATALOG),
+      };
+    } catch (err) {
+      wrapError(err, 'Failed to list agents');
     }
   },
 );

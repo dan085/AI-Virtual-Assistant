@@ -10,7 +10,10 @@ export interface ChatRequest {
 export interface ChatResponse {
   conversationId: string;
   reply: string;
+  agentId: string;
+  agentDisplayName: string;
   usage?: { inputTokens?: number; outputTokens?: number };
+  toolCalls?: Array<{ name: string; input: unknown }>;
 }
 
 export interface PublishRequest {
@@ -23,6 +26,25 @@ export interface PublishResponse {
   mediaId: string;
   creationId: string;
   postDocId: string;
+}
+
+export interface AgentSummary {
+  id: string;
+  displayName: string;
+  tagline: string;
+  description: string;
+  skills: string[];
+}
+
+export interface SkillDescriptor {
+  id: string;
+  label: string;
+  description: string;
+}
+
+export interface ListAgentsResponse {
+  agents: AgentSummary[];
+  skills: SkillDescriptor[];
 }
 
 @Injectable({ providedIn: 'root' })
@@ -44,6 +66,15 @@ export class ApiService {
       'publishToInstagram',
     );
     const res = await callable(req);
+    return res.data;
+  }
+
+  async listAvailableAgents(): Promise<ListAgentsResponse> {
+    const callable = httpsCallable<void, ListAgentsResponse>(
+      this.fns,
+      'listAvailableAgents',
+    );
+    const res = await callable();
     return res.data;
   }
 }

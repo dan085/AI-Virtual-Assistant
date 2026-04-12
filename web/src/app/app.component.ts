@@ -15,6 +15,7 @@ import { AuthService } from './core/auth.service';
         @if (auth.user()) {
           <nav>
             <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">Dashboard</a>
+            <a routerLink="/agents" routerLinkActive="active">Agents</a>
             <a routerLink="/chat" routerLinkActive="active">Chat</a>
             <a routerLink="/instagram" routerLinkActive="active">Instagram</a>
           </nav>

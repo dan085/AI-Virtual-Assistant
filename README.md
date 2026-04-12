@@ -200,20 +200,64 @@ Required GitHub repository secrets:
 - Writes to `users/{uid}/instagramPosts/{postId}`
 - Image URL must be publicly reachable (Firebase Storage signed URLs work)
 
-## Customizing the agent
+## Agents & Skills
 
-The default agent persona is defined in
-`functions/src/agent/agent.ts`. To build a vertical agent (e.g. a medical
-assistant like DrPineapple.cl), create a document in the `agents` collection:
+The platform ships with a small registry of **agents** (personas) and
+**skills** (tools the LLM can call). Agents only see the skills they've
+been explicitly granted — a scheduling agent cannot publish Instagram
+posts, for example.
 
+### Built-in agents
+
+All definitions live in `functions/src/agent/registry.ts` and are seeded
+to Firestore so they can be edited at runtime:
+
+| Agent id | Display name | Purpose | Skills |
+| --- | --- | --- | --- |
+| `default` | **Emma** | Everyday general-purpose assistant | time, IG draft, reminders, knowledge |
+| `dr-pineapple` | **Dr. Pineapple** | Servicio técnico iOS (iPhone/iPad/Mac/Watch/AirPods). Diagnóstico, troubleshooting seguro, y estimación de visita al taller. | time, reminders, knowledge |
+| `social-manager` | **Nina** | Instagram co-pilot — drafts captions + hashtags | time, IG draft, knowledge |
+| `scheduler` | **Chronos** | Reminder management only | time, reminders |
+
+### Built-in skills
+
+| Skill id | What it does |
+| --- | --- |
+| `getCurrentTime` | Returns the current date/time in an IANA timezone. |
+| `createInstagramDraft` | Saves an Instagram post as a **draft** in `users/{uid}/instagramPosts`. Cannot publish — a human click in the UI is always required. |
+| `createReminder` | Writes a pending reminder to `users/{uid}/reminders`. |
+| `searchKnowledgeBase` | Keyword-searches the user's personal `users/{uid}/knowledge` docs. Swap for vector search once you have volume. |
+| `searchWeb` | Google Custom Search (requires `GOOGLE_SEARCH_API_KEY` + `GOOGLE_SEARCH_CX` secrets). |
+
+### Seeding agents to Firestore
+
+After your first deploy, run the seed script once so the `agents`
+collection is populated:
+
+```bash
+cd functions
+npm run seed:agents            # against the real project
+# or
+npm run seed:agents:emulator   # against a local emulator
 ```
-agents/dr-pineapple
-  displayName: "Dr. Pineapple"
-  systemPrompt: "You are Dr. Pineapple, a friendly health information assistant…"
-```
 
-Then pass `agentId: 'dr-pineapple'` when calling `chatWithAgent` from the
-frontend.
+Re-running is safe (idempotent `set({merge: true})`).
+
+### Creating a new agent
+
+Edit `functions/src/agent/registry.ts`, add an entry to `BUILTIN_AGENTS`,
+rebuild Functions, and re-run the seed script. The frontend agent picker
+will pick it up automatically via the `listAvailableAgents` callable.
+
+### Safety rails
+
+- `createInstagramDraft` can never publish — `publishToInstagram` is a
+  separate callable that only fires from the Instagram UI after an
+  explicit user click.
+- `Dr. Pineapple` is instructed to **never** ask for Apple ID, passwords,
+  verification codes, or card numbers.
+- Tools are scoped per user: the `ToolContext` carries the Firebase Auth
+  `uid` so writes always land under `users/{uid}/…`.
 
 ## License
 
