@@ -108,6 +108,28 @@ export interface SocialPublishRequest {
   coverUrl?: string;
 }
 
+// ---------- Scheduled posts ----------
+export interface CreateScheduledPostRequest {
+  platforms: SocialPlatformId[];
+  mediaType: SocialMediaType;
+  caption?: string;
+  imageUrl?: string;
+  videoUrl?: string;
+  coverUrl?: string;
+  scheduledAtIso: string;
+}
+
+// ---------- Admin ----------
+export interface AdminAgent {
+  id: string;
+  displayName?: string;
+  tagline?: string;
+  description?: string;
+  systemPrompt?: string;
+  skills?: string[];
+  published?: boolean;
+}
+
 @Injectable({ providedIn: 'root' })
 export class ApiService {
   private readonly fns = inject(Functions);
@@ -160,5 +182,39 @@ export class ApiService {
       'publishToSocial',
     );
     return (await cb(req)).data;
+  }
+
+  // ----- Scheduled posts -----
+  async createScheduledPost(req: CreateScheduledPostRequest): Promise<{ id: string }> {
+    const cb = httpsCallable<CreateScheduledPostRequest, { id: string }>(
+      this.fns,
+      'createScheduledPostCallable',
+    );
+    return (await cb(req)).data;
+  }
+
+  async cancelScheduledPost(id: string): Promise<void> {
+    const cb = httpsCallable<{ id: string }, { ok: boolean }>(
+      this.fns,
+      'cancelScheduledPostCallable',
+    );
+    await cb({ id });
+  }
+
+  // ----- Admin -----
+  async adminListAllAgents(): Promise<{ agents: AdminAgent[] }> {
+    const cb = httpsCallable<void, { agents: AdminAgent[] }>(
+      this.fns,
+      'adminListAllAgents',
+    );
+    return (await cb()).data;
+  }
+
+  async adminUpdateAgent(agent: AdminAgent): Promise<{ ok: boolean; id: string }> {
+    const cb = httpsCallable<AdminAgent, { ok: boolean; id: string }>(
+      this.fns,
+      'adminUpdateAgent',
+    );
+    return (await cb(agent)).data;
   }
 }

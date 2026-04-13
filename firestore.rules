@@ -68,6 +68,18 @@ service cloud.firestore {
         allow read, create, delete: if isOwner(userId);
         allow update: if false;
       }
+
+      // Scheduled posts — clients read and create, but only Functions
+      // can transition status (publishing / published / failed).
+      match /scheduledPosts/{postId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId)
+          && request.resource.data.status == 'scheduled';
+        allow update: if isOwner(userId)
+          && request.resource.data.status == 'cancelled'
+          && resource.data.status == 'scheduled';
+        allow delete: if false;
+      }
     }
 
     // -------- PKCE store for social OAuth (deny all client access) --------

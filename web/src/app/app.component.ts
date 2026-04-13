@@ -19,9 +19,13 @@ import { AuthService } from './core/auth.service';
             <a routerLink="/chat" routerLinkActive="active">Chat</a>
             <a routerLink="/media" routerLinkActive="active">Media</a>
             <a routerLink="/videos" routerLinkActive="active">AI videos</a>
+            <a routerLink="/scheduler" routerLinkActive="active">Scheduler</a>
             <a routerLink="/instagram" routerLinkActive="active">Instagram</a>
             <a routerLink="/connections" routerLinkActive="active">Connections</a>
             <a routerLink="/tickets" routerLinkActive="active">Tickets</a>
+            @if (auth.isAdmin()) {
+              <a routerLink="/admin/agents" routerLinkActive="active">Admin</a>
+            }
           </nav>
           <button class="signout" (click)="auth.signOut()">Sign out</button>
         } @else {

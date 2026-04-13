@@ -88,6 +88,26 @@ export class UserDataService {
     );
   }
 
+  /** Live listing of scheduled posts. */
+  scheduledPosts(): Signal<ScheduledPostDoc[] | undefined> {
+    return toSignal(
+      this.uid$.pipe(
+        switchMap((uid) => {
+          if (!uid) return of<ScheduledPostDoc[]>([]);
+          const col = collection(
+            this.fs,
+            `users/${uid}/scheduledPosts`,
+          ) as CollectionReference<DocumentData>;
+          return collectionData(
+            query(col, orderBy('scheduledAt', 'asc')),
+            { idField: 'id' },
+          ) as Observable<ScheduledPostDoc[]>;
+        }),
+      ),
+      { initialValue: undefined },
+    );
+  }
+
   /** Live listing of media library entries. */
   mediaAssets(): Signal<MediaAssetDoc[] | undefined> {
     return toSignal(
@@ -157,6 +177,26 @@ export interface InstagramPostDoc {
   mediaId?: string;
   createdAt?: FirestoreTimestampLike;
   publishedAt?: FirestoreTimestampLike;
+}
+
+export interface ScheduledPostDoc {
+  id: string;
+  platforms: string[];
+  mediaType: string;
+  caption?: string;
+  imageUrl?: string;
+  videoUrl?: string;
+  status: 'scheduled' | 'publishing' | 'published' | 'partially_published' | 'failed' | 'cancelled';
+  scheduledAt?: FirestoreTimestampLike;
+  createdAt?: FirestoreTimestampLike;
+  publishedAt?: FirestoreTimestampLike;
+  createdBy?: 'user' | 'agent';
+  results?: Record<string, {
+    status: 'ok' | 'failed';
+    remoteId?: string;
+    permalink?: string;
+    error?: string;
+  }>;
 }
 
 export interface MediaAssetDoc {

@@ -317,6 +317,49 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))" | \
 4. The `oauthCallback` HTTP function handles the return leg of every
    platform's OAuth flow uniformly.
 
+## Scheduled posts
+
+Queue posts for automatic multi-platform publication. Scheduled posts
+live at `users/{uid}/scheduledPosts/{id}`. A Cloud Function
+(`processDueScheduledPosts`) runs every minute, picks due posts, and
+publishes them per-platform using each user's stored OAuth tokens.
+
+- **Concurrency**: the scheduler uses a compare-and-swap on `status`
+  (`scheduled → publishing`) inside a Firestore transaction, so two
+  overlapping runs cannot double-publish the same post.
+- **Partial failures**: if a post targets 3 platforms and 2 succeed, the
+  document ends in `partially_published` with per-platform `results`
+  containing `remoteId` or `error`.
+- **UI**: `/scheduler` page lets users pick platforms, media type,
+  caption, media URL, and datetime. Scheduled posts can be cancelled
+  before they fire.
+- **Agent skill**: Nina (`social-manager`) has the `schedulePost` skill.
+  Ask her to "schedule a reel for tomorrow at 9am" and she will call it.
+
+## Admin panel
+
+Agents live in both code (`functions/src/agent/registry.ts`) and
+Firestore (`agents/{id}`). The code holds authoritative defaults; any
+Firestore override takes precedence at runtime. That lets non-developers
+edit persona prompts and toggle skills without a redeploy.
+
+`/admin/agents` is gated by a Firebase Auth custom claim:
+
+```ts
+// Run once against your own uid:
+await admin.auth().setCustomUserClaims(uid, { admin: true });
+```
+
+Sign out and back in to refresh the id token. The sidebar exposes the
+Admin link only when `AuthService.isAdmin()` is true. Behind the
+scenes, the callables `adminListAllAgents` and `adminUpdateAgent`
+verify `request.auth.token.admin === true` server-side — client-side
+hiding alone is not a security boundary.
+
+Editable fields per agent: display name, tagline, description, full
+system prompt, skills array, published flag. Unknown skill ids are
+rejected at write time against the canonical `SKILL_IDS`.
+
 ## Agents & Skills
 
 The platform ships with a small registry of **agents** (personas) and

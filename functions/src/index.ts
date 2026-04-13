@@ -103,6 +103,19 @@ export const listAvailableAgents = onCall(
 
 // Scheduled
 export { processDueReminders } from './scheduled/process-reminders';
+export { processDueScheduledPosts } from './scheduled/process-scheduled-posts';
+
+// Scheduler (user-facing)
+export {
+  createScheduledPostCallable,
+  cancelScheduledPostCallable,
+} from './scheduler/endpoints';
+
+// Admin
+export {
+  adminUpdateAgent,
+  adminListAllAgents,
+} from './admin/endpoints';
 
 // Multi-platform social (Instagram / Twitter / TikTok) OAuth + publish
 export {

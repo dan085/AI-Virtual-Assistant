@@ -13,6 +13,7 @@ import {
 } from './generate-video.tool';
 import { defineGenerateImageTool } from './generate-image.tool';
 import { definePlanContentTool } from './plan-content.tool';
+import { defineSchedulePostTool } from './schedule-post.tool';
 
 type GenkitTool = ReturnType<Genkit['defineTool']>;
 
@@ -34,6 +35,7 @@ export const SKILL_IDS = [
   'checkVideoGenerationStatus',
   'generateAiImage',
   'planStoryContent',
+  'schedulePost',
 ] as const;
 
 export type SkillId = (typeof SKILL_IDS)[number];
@@ -117,6 +119,13 @@ export const SKILL_CATALOG: Record<SkillId, SkillDescriptor> = {
       'Uses a secondary LLM call to decide whether a Story should be an image or a video, drafts prompts, caption, and hashtags.',
     category: 'content',
   },
+  schedulePost: {
+    id: 'schedulePost',
+    label: 'Schedule post',
+    description:
+      'Schedules a multi-platform post (Instagram / Facebook / Twitter / TikTok) for a future time.',
+    category: 'content',
+  },
 };
 
 export function buildTools(
@@ -138,6 +147,7 @@ export function buildTools(
   if (allow.has('checkVideoGenerationStatus')) tools.push(defineCheckVideoStatusTool(ai, ctx));
   if (allow.has('generateAiImage')) tools.push(defineGenerateImageTool(ai, ctx));
   if (allow.has('planStoryContent')) tools.push(definePlanContentTool(ai, ctx));
+  if (allow.has('schedulePost')) tools.push(defineSchedulePostTool(ai, ctx));
 
   return tools;
 }

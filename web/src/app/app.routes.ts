@@ -65,6 +65,22 @@ export const routes: Routes = [
     canActivate: [authGuard],
   },
   {
+    path: 'scheduler',
+    loadComponent: () =>
+      import('./features/scheduler/scheduler.component').then(
+        (m) => m.SchedulerComponent,
+      ),
+    canActivate: [authGuard],
+  },
+  {
+    path: 'admin/agents',
+    loadComponent: () =>
+      import('./features/admin/admin-agents.component').then(
+        (m) => m.AdminAgentsComponent,
+      ),
+    canActivate: [authGuard],
+  },
+  {
     path: 'login',
     loadComponent: () =>
       import('./features/auth/login.component').then((m) => m.LoginComponent),
