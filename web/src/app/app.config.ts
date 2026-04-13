@@ -13,6 +13,12 @@ import {
   getStorage,
   connectStorageEmulator,
 } from '@angular/fire/storage';
+import {
+  provideAnalytics,
+  getAnalytics,
+  isSupported as analyticsSupported,
+  ScreenTrackingService,
+} from '@angular/fire/analytics';
 
 import { routes } from './app.routes';
 import { environment } from '../environments/environment';
@@ -57,5 +63,17 @@ export const appConfig: ApplicationConfig = {
       }
       return st;
     }),
+
+    // Analytics is optional: only load in prod, only if the browser
+    // supports it (SSR / bots / privacy modes don't). measurementId
+    // must be set in environment.firebase for it to initialize.
+    provideAnalytics(() => {
+      // isSupported() is async — Firebase handles the lazy init behind
+      // the scenes, so returning getAnalytics() directly is fine here.
+      // On unsupported platforms it no-ops.
+      void analyticsSupported();
+      return getAnalytics();
+    }),
+    ScreenTrackingService,
   ],
 };

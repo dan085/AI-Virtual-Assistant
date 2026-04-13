@@ -35,47 +35,17 @@ jobs:
           path: ~/.npm
           key: npm-${{ runner.os }}-${{ hashFiles('web/package-lock.json', 'functions/package-lock.json') }}
 
-      - name: Write .firebaserc from secret
+      - name: Override .firebaserc from secret (optional)
         env:
           FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
         run: |
           if [ -n "$FIREBASE_PROJECT_ID" ]; then
             printf '{ "projects": { "default": "%s" } }\n' "$FIREBASE_PROJECT_ID" > .firebaserc
-            cat .firebaserc
+            echo "Overrode .firebaserc to project: $FIREBASE_PROJECT_ID"
           else
-            echo "::warning::FIREBASE_PROJECT_ID not set — using the committed .firebaserc"
+            echo "Using committed .firebaserc:"
+            cat .firebaserc
           fi
-
-      - name: Inject Firebase web config into environment.prod.ts
-        env:
-          FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
-          FIREBASE_AUTH_DOMAIN: ${{ secrets.FIREBASE_AUTH_DOMAIN }}
-          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
-          FIREBASE_STORAGE_BUCKET: ${{ secrets.FIREBASE_STORAGE_BUCKET }}
-          FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.FIREBASE_MESSAGING_SENDER_ID }}
-          FIREBASE_APP_ID: ${{ secrets.FIREBASE_APP_ID }}
-        run: |
-          if [ -z "$FIREBASE_PROJECT_ID" ]; then
-            echo "::warning::Firebase web config secrets not set — keeping placeholder environment.prod.ts"
-            exit 0
-          fi
-          auth_domain="${FIREBASE_AUTH_DOMAIN:-${FIREBASE_PROJECT_ID}.firebaseapp.com}"
-          storage_bucket="${FIREBASE_STORAGE_BUCKET:-${FIREBASE_PROJECT_ID}.appspot.com}"
-          cat > web/src/environments/environment.prod.ts <<EOF
-          export const environment = {
-            production: true,
-            useEmulators: false,
-            firebase: {
-              apiKey: '${FIREBASE_API_KEY}',
-              authDomain: '${auth_domain}',
-              projectId: '${FIREBASE_PROJECT_ID}',
-              storageBucket: '${storage_bucket}',
-              messagingSenderId: '${FIREBASE_MESSAGING_SENDER_ID}',
-              appId: '${FIREBASE_APP_ID}',
-            },
-          };
-          EOF
-          echo "✓ environment.prod.ts regenerated"
 
       - name: Install web deps
         working-directory: web
@@ -120,15 +90,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Check secrets
+      - name: Resolve project id
+        id: project
+        env:
+          PID: ${{ secrets.FIREBASE_PROJECT_ID }}
+        run: |
+          if [ -n "$PID" ]; then
+            echo "id=$PID" >> "$GITHUB_OUTPUT"
+          else
+            id=$(node -p "require('./.firebaserc').projects.default")
+            echo "id=$id" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check service account secret
         id: check
         env:
           SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-          PID: ${{ secrets.FIREBASE_PROJECT_ID }}
         run: |
-          if [ -z "$SA" ] || [ -z "$PID" ]; then
+          if [ -z "$SA" ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "::warning::Missing FIREBASE_SERVICE_ACCOUNT or FIREBASE_PROJECT_ID secret — skipping preview deploy."
+            echo "::warning::FIREBASE_SERVICE_ACCOUNT secret not set — skipping preview deploy."
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
@@ -146,7 +127,7 @@ jobs:
         with:
           repoToken: ${{ secrets.GITHUB_TOKEN }}
           firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-          projectId: ${{ secrets.FIREBASE_PROJECT_ID }}
+          projectId: ${{ steps.project.outputs.id }}
           expires: 7d
 
   # ---------------------------------------------------------------
@@ -167,56 +148,31 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - name: Verify required secrets
+      - name: Verify service account secret
         env:
           SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-          PID: ${{ secrets.FIREBASE_PROJECT_ID }}
         run: |
-          missing=0
           if [ -z "$SA" ]; then
-            echo "::error::FIREBASE_SERVICE_ACCOUNT secret is not set"
-            missing=1
+            echo "::error::FIREBASE_SERVICE_ACCOUNT secret is not set. Create a service account key JSON and add it to GitHub Secrets."
+            exit 1
           fi
-          if [ -z "$PID" ]; then
-            echo "::error::FIREBASE_PROJECT_ID secret is not set"
-            missing=1
-          fi
-          if [ $missing -eq 1 ]; then exit 1; fi
 
       - name: Install Firebase CLI
         run: npm install -g firebase-tools@latest
 
-      - name: Write .firebaserc
+      - name: Resolve project id
+        id: project
         env:
-          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+          PID: ${{ secrets.FIREBASE_PROJECT_ID }}
         run: |
-          printf '{ "projects": { "default": "%s" } }\n' "$FIREBASE_PROJECT_ID" > .firebaserc
-
-      - name: Inject Firebase web config
-        env:
-          FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
-          FIREBASE_AUTH_DOMAIN: ${{ secrets.FIREBASE_AUTH_DOMAIN }}
-          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
-          FIREBASE_STORAGE_BUCKET: ${{ secrets.FIREBASE_STORAGE_BUCKET }}
-          FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.FIREBASE_MESSAGING_SENDER_ID }}
-          FIREBASE_APP_ID: ${{ secrets.FIREBASE_APP_ID }}
-        run: |
-          auth_domain="${FIREBASE_AUTH_DOMAIN:-${FIREBASE_PROJECT_ID}.firebaseapp.com}"
-          storage_bucket="${FIREBASE_STORAGE_BUCKET:-${FIREBASE_PROJECT_ID}.appspot.com}"
-          cat > web/src/environments/environment.prod.ts <<EOF
-          export const environment = {
-            production: true,
-            useEmulators: false,
-            firebase: {
-              apiKey: '${FIREBASE_API_KEY}',
-              authDomain: '${auth_domain}',
-              projectId: '${FIREBASE_PROJECT_ID}',
-              storageBucket: '${storage_bucket}',
-              messagingSenderId: '${FIREBASE_MESSAGING_SENDER_ID}',
-              appId: '${FIREBASE_APP_ID}',
-            },
-          };
-          EOF
+          if [ -n "$PID" ]; then
+            echo "id=$PID" >> "$GITHUB_OUTPUT"
+            printf '{ "projects": { "default": "%s" } }\n' "$PID" > .firebaserc
+          else
+            id=$(node -p "require('./.firebaserc').projects.default")
+            echo "id=$id" >> "$GITHUB_OUTPUT"
+          fi
+          echo "Project: $(node -p \"require('./.firebaserc').projects.default\")"
 
       - name: Install & build web
         working-directory: web
@@ -236,21 +192,21 @@ jobs:
           echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/sa.json" >> "$GITHUB_ENV"
 
       - name: Deploy Firestore rules + Storage rules
-        run: firebase deploy --only firestore,storage --project ${{ secrets.FIREBASE_PROJECT_ID }} --non-interactive
+        run: firebase deploy --only firestore,storage --project ${{ steps.project.outputs.id }} --non-interactive
 
       - name: Deploy Functions (non-blocking)
         continue-on-error: true
-        run: firebase deploy --only functions --project ${{ secrets.FIREBASE_PROJECT_ID }} --non-interactive
+        run: firebase deploy --only functions --project ${{ steps.project.outputs.id }} --non-interactive
 
       - name: Deploy Hosting (predeploy + postdeploy hooks run here)
-        run: firebase deploy --only hosting --project ${{ secrets.FIREBASE_PROJECT_ID }} --non-interactive
+        run: firebase deploy --only hosting --project ${{ steps.project.outputs.id }} --non-interactive
         env:
           DEPLOY_WEBHOOK_URL: ${{ secrets.DEPLOY_WEBHOOK_URL }}
 
       - name: Print live URL
         if: success()
         run: |
-          echo "✅ Deployed: https://${{ secrets.FIREBASE_PROJECT_ID }}.web.app"
+          echo "✅ Deployed: https://${{ steps.project.outputs.id }}.web.app"
 
       - name: Cleanup credentials
         if: always()
