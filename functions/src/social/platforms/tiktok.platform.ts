@@ -137,16 +137,33 @@ export class TiktokPlatform implements SocialPlatform {
       throw new Error('TikTok publish requires videoUrl');
     }
 
+    const options = (req.options ?? {}) as {
+      privacyLevel?: 'SELF_ONLY' | 'PUBLIC_TO_EVERYONE' | 'MUTUAL_FOLLOW_FRIENDS' | 'FOLLOWER_OF_CREATOR';
+      disableComment?: boolean;
+      disableDuet?: boolean;
+      disableStitch?: boolean;
+      coverTimestampMs?: number;
+    };
+
+    // Default to SELF_ONLY for safety until the app is approved for
+    // direct-post with public visibility. Users who have been approved
+    // can override via options.privacyLevel or the
+    // TIKTOK_DEFAULT_PRIVACY env var.
+    const privacyLevel =
+      options.privacyLevel ??
+      (process.env.TIKTOK_DEFAULT_PRIVACY as any) ??
+      'SELF_ONLY';
+
     // Step 1: init the post. We use PULL_FROM_URL so TikTok downloads
     // the video from our URL instead of requiring chunked upload.
     const initBody = {
       post_info: {
         title: req.caption ?? '',
-        privacy_level: 'SELF_ONLY', // safest default; bump to PUBLIC_TO_EVERYONE after review
-        disable_duet: false,
-        disable_comment: false,
-        disable_stitch: false,
-        video_cover_timestamp_ms: 1000,
+        privacy_level: privacyLevel,
+        disable_duet: options.disableDuet ?? false,
+        disable_comment: options.disableComment ?? false,
+        disable_stitch: options.disableStitch ?? false,
+        video_cover_timestamp_ms: options.coverTimestampMs ?? 1000,
       },
       source_info: {
         source: 'PULL_FROM_URL',
@@ -178,7 +195,11 @@ export class TiktokPlatform implements SocialPlatform {
       remoteId: init.data.publish_id,
       meta: {
         status: 'processing',
-        hint: 'TikTok is downloading and processing the video. Check status via /v2/post/publish/status/fetch/.',
+        privacyLevel,
+        hint:
+          privacyLevel === 'SELF_ONLY'
+            ? 'TikTok is processing the video as a private draft. Open TikTok on your phone to review and finalize.'
+            : 'TikTok is downloading and processing the video. It will appear on your profile once processing finishes.',
         statusUrl: VIDEO_STATUS_URL,
       },
     };

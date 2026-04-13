@@ -23,6 +23,7 @@ import { AuthService } from './core/auth.service';
             <a routerLink="/instagram" routerLinkActive="active">Instagram</a>
             <a routerLink="/connections" routerLinkActive="active">Connections</a>
             <a routerLink="/tickets" routerLinkActive="active">Tickets</a>
+            <a routerLink="/analytics" routerLinkActive="active">Analytics</a>
             @if (auth.isAdmin()) {
               <a routerLink="/admin/agents" routerLinkActive="active">Admin</a>
             }

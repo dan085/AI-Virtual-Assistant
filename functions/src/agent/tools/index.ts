@@ -14,6 +14,7 @@ import {
 import { defineGenerateImageTool } from './generate-image.tool';
 import { definePlanContentTool } from './plan-content.tool';
 import { defineSchedulePostTool } from './schedule-post.tool';
+import { defineIngestMediaTool } from './ingest-media.tool';
 
 type GenkitTool = ReturnType<Genkit['defineTool']>;
 
@@ -36,6 +37,7 @@ export const SKILL_IDS = [
   'generateAiImage',
   'planStoryContent',
   'schedulePost',
+  'ingestGeneratedMedia',
 ] as const;
 
 export type SkillId = (typeof SKILL_IDS)[number];
@@ -126,6 +128,13 @@ export const SKILL_CATALOG: Record<SkillId, SkillDescriptor> = {
       'Schedules a multi-platform post (Instagram / Facebook / Twitter / TikTok) for a future time.',
     category: 'content',
   },
+  ingestGeneratedMedia: {
+    id: 'ingestGeneratedMedia',
+    label: 'Save generated media',
+    description:
+      "Persists a generated image or video URL into the user's Firebase Storage so it has a stable public URL ready for Instagram / TikTok / Twitter / Facebook.",
+    category: 'content',
+  },
 };
 
 export function buildTools(
@@ -148,6 +157,7 @@ export function buildTools(
   if (allow.has('generateAiImage')) tools.push(defineGenerateImageTool(ai, ctx));
   if (allow.has('planStoryContent')) tools.push(definePlanContentTool(ai, ctx));
   if (allow.has('schedulePost')) tools.push(defineSchedulePostTool(ai, ctx));
+  if (allow.has('ingestGeneratedMedia')) tools.push(defineIngestMediaTool(ai, ctx));
 
   return tools;
 }

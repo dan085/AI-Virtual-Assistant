@@ -109,6 +109,7 @@ export const BUILTIN_AGENTS: Readonly<Record<string, AgentDefinition>> = {
       'generateAiImage',
       'planStoryContent',
       'schedulePost',
+      'ingestGeneratedMedia',
     ],
     defaultLocale: 'en',
     published: true,
