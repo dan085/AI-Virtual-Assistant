@@ -45,6 +45,26 @@ export const routes: Routes = [
     canActivate: [authGuard],
   },
   {
+    path: 'tickets',
+    loadComponent: () =>
+      import('./features/tickets/tickets.component').then((m) => m.TicketsComponent),
+    canActivate: [authGuard],
+  },
+  {
+    path: 'videos',
+    loadComponent: () =>
+      import('./features/videos/videos.component').then((m) => m.VideosComponent),
+    canActivate: [authGuard],
+  },
+  {
+    path: 'media',
+    loadComponent: () =>
+      import('./features/media-library/media-library.component').then(
+        (m) => m.MediaLibraryComponent,
+      ),
+    canActivate: [authGuard],
+  },
+  {
     path: 'login',
     loadComponent: () =>
       import('./features/auth/login.component').then((m) => m.LoginComponent),

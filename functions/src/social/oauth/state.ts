@@ -12,11 +12,31 @@ import { defineSecret } from 'firebase-functions/params';
  *
  * The HMAC prevents an attacker from forging a state that pins the
  * callback to a different user's uid.
+ *
+ * Resolving the signing secret:
+ *   1. If the Firebase Functions secret is populated, use it.
+ *   2. Otherwise (unit tests, emulator without secret) fall back to
+ *      process.env.SOCIAL_OAUTH_SIGNING_SECRET.
+ *   3. If neither is set, throw clearly.
  */
 
 export const SOCIAL_OAUTH_SIGNING_SECRET = defineSecret(
   'SOCIAL_OAUTH_SIGNING_SECRET',
 );
+
+function getSigningSecret(): string {
+  try {
+    const v = SOCIAL_OAUTH_SIGNING_SECRET.value();
+    if (v) return v;
+  } catch {
+    // Falls through to env lookup.
+  }
+  const fromEnv = process.env.SOCIAL_OAUTH_SIGNING_SECRET;
+  if (fromEnv) return fromEnv;
+  throw new Error(
+    'SOCIAL_OAUTH_SIGNING_SECRET is not configured. Run: firebase functions:secrets:set SOCIAL_OAUTH_SIGNING_SECRET',
+  );
+}
 
 export interface StatePayload {
   uid: string;
@@ -51,6 +71,5 @@ export function freshNonce(): string {
 }
 
 function sign(value: string): string {
-  const secret = SOCIAL_OAUTH_SIGNING_SECRET.value();
-  return createHmac('sha256', secret).update(value).digest('base64url');
+  return createHmac('sha256', getSigningSecret()).update(value).digest('base64url');
 }

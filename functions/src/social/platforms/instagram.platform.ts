@@ -1,5 +1,6 @@
 import { defineSecret } from 'firebase-functions/params';
 import {
+  OAuthCallbackContext,
   OAuthCallbackResult,
   OAuthStartResult,
   SocialAccount,
@@ -12,28 +13,23 @@ import { encodeState, freshNonce } from '../oauth/state';
 /**
  * Instagram via Facebook Login + Graph API.
  *
- * Instagram Business accounts publish through their linked Facebook Page.
- * OAuth flow goes through Facebook Login → long-lived user token → we
- * derive a Page token → we find the IG business account id linked to
- * that page.
+ * OAuth flow:
+ *   1. User grants permissions on facebook.com → code
+ *   2. Code → short-lived user token → long-lived user token
+ *   3. /me/accounts → list of Pages with their Page tokens
+ *   4. /{page}?fields=instagram_business_account → IG Business id
+ *   5. We store { accountId: igId, accessToken: pageToken }
  *
- * Secrets:
- *   firebase functions:secrets:set META_APP_ID
- *   firebase functions:secrets:set META_APP_SECRET
- *
- * Scopes required on the Facebook App:
- *   instagram_basic
- *   instagram_content_publish
- *   pages_show_list
- *   pages_read_engagement
- *   business_management
+ * Publishing flow:
+ *   - IMAGE / VIDEO / REELS / STORIES: create container → (wait) → publish
+ *   - CAROUSEL: create each child container → (wait for videos) → create
+ *     parent with children=<ids> → publish
  */
 
 export const META_APP_ID = defineSecret('META_APP_ID');
 export const META_APP_SECRET = defineSecret('META_APP_SECRET');
 
 const AUTHORIZE_URL = 'https://www.facebook.com/v21.0/dialog/oauth';
-const TOKEN_URL = 'https://graph.facebook.com/v21.0/oauth/access_token';
 const GRAPH_BASE = 'https://graph.facebook.com/v21.0';
 
 const SCOPES = [
@@ -63,7 +59,10 @@ export class InstagramPlatform implements SocialPlatform {
     }
   }
 
-  buildAuthorizeUrl(uid: string, redirectUri: string): OAuthStartResult {
+  async buildAuthorizeUrl(
+    uid: string,
+    redirectUri: string,
+  ): Promise<OAuthStartResult> {
     const nonce = freshNonce();
     const state = encodeState({ uid, platform: this.id, nonce });
 
@@ -73,46 +72,39 @@ export class InstagramPlatform implements SocialPlatform {
     url.searchParams.set('state', state);
     url.searchParams.set('scope', SCOPES.join(','));
     url.searchParams.set('response_type', 'code');
-
     return { authorizeUrl: url.toString(), state };
   }
 
   async handleCallback(
     code: string,
     redirectUri: string,
+    _ctx: OAuthCallbackContext,
   ): Promise<OAuthCallbackResult> {
-    // 1. Exchange code → short-lived user token
-    const tokenUrl = new URL(TOKEN_URL);
+    const tokenUrl = new URL(`${GRAPH_BASE}/oauth/access_token`);
     tokenUrl.searchParams.set('client_id', META_APP_ID.value());
     tokenUrl.searchParams.set('client_secret', META_APP_SECRET.value());
     tokenUrl.searchParams.set('redirect_uri', redirectUri);
     tokenUrl.searchParams.set('code', code);
-
     const tokRes = await fetch(tokenUrl);
     if (!tokRes.ok) throw new Error(`Meta token exchange failed: ${tokRes.status}`);
     const { access_token: shortLived } = (await tokRes.json()) as {
       access_token: string;
     };
 
-    // 2. Upgrade to long-lived user token (~60 days).
     const longUrl = new URL(`${GRAPH_BASE}/oauth/access_token`);
     longUrl.searchParams.set('grant_type', 'fb_exchange_token');
     longUrl.searchParams.set('client_id', META_APP_ID.value());
     longUrl.searchParams.set('client_secret', META_APP_SECRET.value());
     longUrl.searchParams.set('fb_exchange_token', shortLived);
-
     const longRes = await fetch(longUrl);
-    if (!longRes.ok) throw new Error('Meta long-lived token exchange failed');
     const { access_token: longLived, expires_in } = (await longRes.json()) as {
       access_token: string;
       expires_in?: number;
     };
 
-    // 3. Find the user's Pages.
     const pagesRes = await fetch(
       `${GRAPH_BASE}/me/accounts?access_token=${encodeURIComponent(longLived)}`,
     );
-    if (!pagesRes.ok) throw new Error('Meta /me/accounts failed');
     const pages = (await pagesRes.json()) as {
       data?: Array<{ id: string; name: string; access_token: string }>;
     };
@@ -123,7 +115,6 @@ export class InstagramPlatform implements SocialPlatform {
       );
     }
 
-    // 4. Fetch the IG business account id linked to that page.
     const igRes = await fetch(
       `${GRAPH_BASE}/${page.id}?fields=instagram_business_account&access_token=${encodeURIComponent(page.access_token)}`,
     );
@@ -142,7 +133,7 @@ export class InstagramPlatform implements SocialPlatform {
         platform: this.id,
         accountId: igId,
         handle: page.name,
-        accessToken: page.access_token, // we store the PAGE token — that's what publishes
+        accessToken: page.access_token,
         expiresAt: expires_in
           ? Math.floor(Date.now() / 1000) + expires_in
           : undefined,
@@ -156,74 +147,162 @@ export class InstagramPlatform implements SocialPlatform {
     account: SocialAccount,
     req: SocialPublishRequest,
   ): Promise<SocialPublishResult> {
-    // Reuse the existing Instagram media client, but pass the per-user
-    // page token + IG business id from the SocialAccount instead of
-    // the platform-wide secrets.
-    const body: Record<string, string> = {
-      access_token: account.accessToken,
-    };
+    const creationId = await this.createContainer(account, req);
+    const mediaId = await this.publishContainer(account, creationId);
+    return { remoteId: mediaId };
+  }
 
+  // ---------- Container creation ----------
+
+  private async createContainer(
+    account: SocialAccount,
+    req: SocialPublishRequest,
+  ): Promise<string> {
     switch (req.mediaType) {
-      case 'IMAGE':
+      case 'IMAGE': {
         if (!req.imageUrl) throw new Error('imageUrl required');
-        body.image_url = req.imageUrl;
-        if (req.caption) body.caption = req.caption;
-        break;
+        return this.createSimpleContainer(account, {
+          image_url: req.imageUrl,
+          caption: req.caption ?? '',
+        });
+      }
+
       case 'VIDEO':
-      case 'REEL_OR_SHORT':
+      case 'REEL_OR_SHORT': {
         if (!req.videoUrl) throw new Error('videoUrl required');
-        body.media_type = req.mediaType === 'REEL_OR_SHORT' ? 'REELS' : 'VIDEO';
-        body.video_url = req.videoUrl;
+        const body: Record<string, string> = {
+          media_type: req.mediaType === 'REEL_OR_SHORT' ? 'REELS' : 'VIDEO',
+          video_url: req.videoUrl,
+        };
         if (req.caption) body.caption = req.caption;
         if (req.coverUrl) body.cover_url = req.coverUrl;
-        break;
-      case 'STORY':
-        body.media_type = 'STORIES';
+        if (req.mediaType === 'REEL_OR_SHORT') body.share_to_feed = 'true';
+        const id = await this.createSimpleContainer(account, body);
+        await this.waitForContainer(account, id);
+        return id;
+      }
+
+      case 'STORY': {
+        const body: Record<string, string> = { media_type: 'STORIES' };
         if (req.videoUrl) body.video_url = req.videoUrl;
         else if (req.imageUrl) body.image_url = req.imageUrl;
         else throw new Error('STORY requires imageUrl or videoUrl');
-        break;
+        const id = await this.createSimpleContainer(account, body);
+        if (req.videoUrl) await this.waitForContainer(account, id);
+        return id;
+      }
+
+      case 'CAROUSEL': {
+        if (!req.children || req.children.length < 2 || req.children.length > 10) {
+          throw new Error('CAROUSEL requires 2-10 children');
+        }
+        const childIds: string[] = [];
+        for (const child of req.children) {
+          if (child.videoUrl) {
+            const id = await this.createSimpleContainer(account, {
+              media_type: 'VIDEO',
+              video_url: child.videoUrl,
+              is_carousel_item: 'true',
+            });
+            await this.waitForContainer(account, id);
+            childIds.push(id);
+          } else if (child.imageUrl) {
+            const id = await this.createSimpleContainer(account, {
+              image_url: child.imageUrl,
+              is_carousel_item: 'true',
+            });
+            childIds.push(id);
+          }
+        }
+        return this.createSimpleContainer(account, {
+          media_type: 'CAROUSEL',
+          children: childIds.join(','),
+          caption: req.caption ?? '',
+        });
+      }
+
       default:
         throw new Error(`Unsupported Instagram mediaType: ${req.mediaType}`);
     }
+  }
 
-    // Step 1: create container
-    const containerRes = await fetch(`${GRAPH_BASE}/${account.accountId}/media`, {
+  private async createSimpleContainer(
+    account: SocialAccount,
+    body: Record<string, string>,
+  ): Promise<string> {
+    const res = await fetch(`${GRAPH_BASE}/${account.accountId}/media`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams(body).toString(),
+      body: new URLSearchParams({
+        ...body,
+        access_token: account.accessToken,
+      }).toString(),
     });
-    const container = (await containerRes.json()) as {
+    const data = (await res.json()) as {
       id?: string;
       error?: { message: string };
     };
-    if (!container.id) {
-      throw new Error(`Instagram container error: ${container.error?.message}`);
+    if (!data.id) {
+      throw new Error(`Instagram container error: ${data.error?.message}`);
     }
+    return data.id;
+  }
 
-    // TODO: for VIDEO/REELS we should poll /{container-id}?fields=status_code
-    // until FINISHED. Keeping it terse here since the non-OAuth path in
-    // instagram/client.ts already has the polling helper.
+  /**
+   * Poll a container until status_code === FINISHED. Required for
+   * VIDEO / REELS / video-STORY because Meta has to download and
+   * transcode the source before it can be published.
+   */
+  private async waitForContainer(
+    account: SocialAccount,
+    containerId: string,
+    opts: { maxWaitMs?: number; intervalMs?: number } = {},
+  ): Promise<void> {
+    const maxWait = opts.maxWaitMs ?? 5 * 60 * 1000;
+    const interval = opts.intervalMs ?? 5_000;
+    const started = Date.now();
+    while (Date.now() - started < maxWait) {
+      const res = await fetch(
+        `${GRAPH_BASE}/${containerId}?fields=status_code,status&access_token=${encodeURIComponent(account.accessToken)}`,
+      );
+      const data = (await res.json()) as {
+        status_code?: string;
+        status?: string;
+        error?: { message: string };
+      };
+      if (data.status_code === 'FINISHED') return;
+      if (data.status_code === 'ERROR' || data.status_code === 'EXPIRED') {
+        throw new Error(
+          `Instagram container ${containerId} ${data.status_code}: ${data.status ?? ''}`,
+        );
+      }
+      await new Promise((r) => setTimeout(r, interval));
+    }
+    throw new Error(`Timed out waiting for container ${containerId}`);
+  }
 
-    // Step 2: publish
-    const pubRes = await fetch(
+  private async publishContainer(
+    account: SocialAccount,
+    creationId: string,
+  ): Promise<string> {
+    const res = await fetch(
       `${GRAPH_BASE}/${account.accountId}/media_publish`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({
-          creation_id: container.id,
+          creation_id: creationId,
           access_token: account.accessToken,
         }).toString(),
       },
     );
-    const pub = (await pubRes.json()) as {
+    const data = (await res.json()) as {
       id?: string;
       error?: { message: string };
     };
-    if (!pub.id) {
-      throw new Error(`Instagram publish error: ${pub.error?.message}`);
+    if (!data.id) {
+      throw new Error(`Instagram publish error: ${data.error?.message}`);
     }
-    return { remoteId: pub.id };
+    return data.id;
   }
 }

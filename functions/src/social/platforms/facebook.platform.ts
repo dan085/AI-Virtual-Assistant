@@ -1,4 +1,5 @@
 import {
+  OAuthCallbackContext,
   OAuthCallbackResult,
   OAuthStartResult,
   SocialAccount,
@@ -36,7 +37,7 @@ const SCOPES = [
 ];
 
 export class FacebookPlatform implements SocialPlatform {
-  readonly id = 'facebook' as any; // 'facebook' added to SocialPlatformId union
+  readonly id = 'facebook' as const;
   readonly label = 'Facebook Pages';
   readonly supportedMediaTypes = ['TEXT', 'IMAGE', 'VIDEO'] as const;
 
@@ -48,9 +49,12 @@ export class FacebookPlatform implements SocialPlatform {
     }
   }
 
-  buildAuthorizeUrl(uid: string, redirectUri: string): OAuthStartResult {
+  async buildAuthorizeUrl(
+    uid: string,
+    redirectUri: string,
+  ): Promise<OAuthStartResult> {
     const nonce = freshNonce();
-    const state = encodeState({ uid, platform: 'facebook', nonce });
+    const state = encodeState({ uid, platform: this.id, nonce });
 
     const url = new URL(AUTHORIZE_URL);
     url.searchParams.set('client_id', META_APP_ID.value());
@@ -64,6 +68,7 @@ export class FacebookPlatform implements SocialPlatform {
   async handleCallback(
     code: string,
     redirectUri: string,
+    _ctx: OAuthCallbackContext,
   ): Promise<OAuthCallbackResult> {
     // Exchange code → user access token
     const tokenUrl = new URL(`${GRAPH_BASE}/oauth/access_token`);
@@ -103,7 +108,7 @@ export class FacebookPlatform implements SocialPlatform {
 
     return {
       account: {
-        platform: 'facebook' as any,
+        platform: this.id,
         accountId: page.id,
         handle: page.name,
         accessToken: page.access_token,

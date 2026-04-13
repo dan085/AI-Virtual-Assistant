@@ -62,7 +62,7 @@ export const startSocialOAuth = onCall(
       );
     }
     const redirectUri = buildRedirectUri(platform.id, parsed.data.origin);
-    return platform.buildAuthorizeUrl(uid, redirectUri);
+    return await platform.buildAuthorizeUrl(uid, redirectUri);
   },
 );
 
@@ -121,7 +121,9 @@ export const oauthCallback = onRequest(
         platformId,
         `${req.protocol}://${req.get('host')}`,
       );
-      const result = await platform.handleCallback(code, redirectUri);
+      const result = await platform.handleCallback(code, redirectUri, {
+        nonce: decoded.nonce,
+      });
       await saveSocialAccount(decoded.uid, result.account);
 
       // Redirect back to the frontend Connections page.

@@ -58,13 +58,24 @@ service cloud.firestore {
       }
 
       // Connected social accounts — OAuth tokens live here.
-      // Clients can READ metadata only if we strip secrets (see below),
-      // but to be safe we deny all client access and force reads through
-      // the `listSocialConnections` callable, which returns a scrubbed
-      // payload.
+      // Clients cannot read or write; Admin SDK bypasses these rules.
       match /socialAccounts/{platformId} {
         allow read, write: if false;
       }
+
+      // User-uploaded media assets (metadata; bytes live in Storage).
+      match /mediaAssets/{assetId} {
+        allow read, create, delete: if isOwner(userId);
+        allow update: if false;
+      }
+    }
+
+    // -------- PKCE store for social OAuth (deny all client access) --------
+    // Admin SDK (Cloud Functions) reads/writes oauthPkce/{nonce} with a
+    // 10-minute TTL field. Enable TTL cleanup in the Firebase Console
+    // on field `expiresAt`.
+    match /oauthPkce/{nonce} {
+      allow read, write: if false;
     }
 
     // -------- Agent catalog (signed-in read, functions-only write) --------

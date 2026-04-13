@@ -1,5 +1,6 @@
 import { defineSecret } from 'firebase-functions/params';
 import {
+  OAuthCallbackContext,
   OAuthCallbackResult,
   OAuthStartResult,
   SocialAccount,
@@ -57,7 +58,10 @@ export class TiktokPlatform implements SocialPlatform {
     }
   }
 
-  buildAuthorizeUrl(uid: string, redirectUri: string): OAuthStartResult {
+  async buildAuthorizeUrl(
+    uid: string,
+    redirectUri: string,
+  ): Promise<OAuthStartResult> {
     const nonce = freshNonce();
     const state = encodeState({ uid, platform: this.id, nonce });
 
@@ -74,6 +78,7 @@ export class TiktokPlatform implements SocialPlatform {
   async handleCallback(
     code: string,
     redirectUri: string,
+    _ctx: OAuthCallbackContext,
   ): Promise<OAuthCallbackResult> {
     const tokenRes = await fetch(TOKEN_URL, {
       method: 'POST',

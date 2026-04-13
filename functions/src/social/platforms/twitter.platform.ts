@@ -1,6 +1,6 @@
 import { defineSecret } from 'firebase-functions/params';
-import { createHash, randomBytes } from 'node:crypto';
 import {
+  OAuthCallbackContext,
   OAuthCallbackResult,
   OAuthStartResult,
   SocialAccount,
@@ -9,20 +9,13 @@ import {
   SocialPublishResult,
 } from '../platform.interface';
 import { encodeState, freshNonce } from '../oauth/state';
+import { createPkcePair, savePkceVerifier, consumePkceVerifier } from '../oauth/pkce-store';
 
 /**
  * Twitter / X — OAuth 2.0 with PKCE.
  *
- * Developer portal: https://developer.x.com/en/portal/dashboard
- * Docs: https://docs.x.com/resources/fundamentals/authentication/oauth-2-0/authorization-code
- *
- * Secrets:
- *   firebase functions:secrets:set TWITTER_CLIENT_ID
- *   firebase functions:secrets:set TWITTER_CLIENT_SECRET
- *
- * This implementation supports text tweets out of the box. Media
- * uploads are marked TODO — they require the v1.1 media upload endpoint
- * (chunked for video) which is a separate workstream.
+ * Uses a Firestore-backed PKCE store keyed by the state nonce, so the
+ * verifier survives across Cloud Function instances.
  */
 
 export const TWITTER_CLIENT_ID = defineSecret('TWITTER_CLIENT_ID');
@@ -34,11 +27,6 @@ const ME_URL = 'https://api.x.com/2/users/me';
 const TWEETS_URL = 'https://api.x.com/2/tweets';
 
 const SCOPES = ['tweet.read', 'tweet.write', 'users.read', 'offline.access'];
-
-// PKCE: we use the `plain` method for simplicity. Twitter also supports S256.
-// In-memory store of code verifiers keyed by state nonce. For horizontally
-// scaled deployments, move this to Firestore with a short TTL.
-const PKCE_STORE = new Map<string, string>();
 
 export class TwitterPlatform implements SocialPlatform {
   readonly id = 'twitter' as const;
@@ -53,11 +41,13 @@ export class TwitterPlatform implements SocialPlatform {
     }
   }
 
-  buildAuthorizeUrl(uid: string, redirectUri: string): OAuthStartResult {
+  async buildAuthorizeUrl(
+    uid: string,
+    redirectUri: string,
+  ): Promise<OAuthStartResult> {
     const nonce = freshNonce();
-    const verifier = randomBytes(32).toString('base64url');
-    const challenge = createHash('sha256').update(verifier).digest('base64url');
-    PKCE_STORE.set(nonce, verifier);
+    const { verifier, challenge } = createPkcePair();
+    await savePkceVerifier(nonce, verifier);
 
     const state = encodeState({ uid, platform: this.id, nonce });
 
@@ -76,14 +66,11 @@ export class TwitterPlatform implements SocialPlatform {
   async handleCallback(
     code: string,
     redirectUri: string,
+    ctx: OAuthCallbackContext,
   ): Promise<OAuthCallbackResult> {
-    // We would normally recover the verifier from the state nonce; for
-    // brevity we assume the caller passes the right verifier via the
-    // PKCE_STORE. In practice this lookup happens in the HTTP callback
-    // before delegating here.
-    const verifier = Array.from(PKCE_STORE.values()).pop();
+    const verifier = await consumePkceVerifier(ctx.nonce);
     if (!verifier) {
-      throw new Error('Twitter PKCE verifier missing — did you start the flow?');
+      throw new Error('Twitter PKCE verifier missing or expired — start the flow again.');
     }
 
     const tokenRes = await fetch(TOKEN_URL, {

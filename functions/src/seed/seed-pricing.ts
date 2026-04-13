@@ -17,7 +17,7 @@
 import { getAdminApp, db } from '../lib/admin';
 import { FieldValue } from 'firebase-admin/firestore';
 
-interface PricingEntry {
+export interface PricingEntry {
   id: string;
   deviceFamily: 'iphone' | 'ipad' | 'mac' | 'apple_watch' | 'airpods';
   repairType: string;
@@ -28,7 +28,7 @@ interface PricingEntry {
   notes?: string;
 }
 
-const CATALOG: PricingEntry[] = [
+export const CATALOG: PricingEntry[] = [
   // ---------- iPhone ----------
   {
     id: 'iphone__screen_replacement',
@@ -192,7 +192,8 @@ const CATALOG: PricingEntry[] = [
 ];
 
 async function main() {
-  getAdminApp();
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const _app = getAdminApp();
 
   const projectId =
     process.env.GCLOUD_PROJECT ||
@@ -224,8 +225,12 @@ async function main() {
   console.log(`\n✓ Seeded ${CATALOG.length} pricing entries.`);
 }
 
-main().catch((err) => {
-  // eslint-disable-next-line no-console
-  console.error('Seed failed:', err);
-  process.exitCode = 1;
-});
+// Only run when invoked directly (node lib/seed/seed-pricing.js), not
+// when imported as a module (e.g. by tests).
+if (require.main === module) {
+  main().catch((err) => {
+    // eslint-disable-next-line no-console
+    console.error('Seed failed:', err);
+    process.exitCode = 1;
+  });
+}
