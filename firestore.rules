@@ -3,20 +3,19 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Helper functions
+    // -------- Helpers --------
     function isSignedIn() {
       return request.auth != null;
     }
-
     function isOwner(userId) {
       return isSignedIn() && request.auth.uid == userId;
     }
 
-    // Per-user profile
+    // -------- Per-user data --------
     match /users/{userId} {
       allow read, write: if isOwner(userId);
 
-      // Chat conversations owned by the user
+      // Chat conversations
       match /conversations/{conversationId} {
         allow read, write: if isOwner(userId);
 
@@ -25,19 +24,85 @@ service cloud.firestore {
         }
       }
 
-      // Instagram posts drafted/scheduled by the user
+      // Instagram posts (drafts + published) — agent or user created.
       match /instagramPosts/{postId} {
         allow read, write: if isOwner(userId);
       }
+
+      // Reminders — writes by user or agent (Admin SDK bypasses rules).
+      match /reminders/{reminderId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // Personal knowledge base searchable by the agent.
+      match /knowledge/{docId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // Service tickets (DrPineapple workflow).
+      match /tickets/{ticketId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // AI video generation jobs.
+      match /videoGenerations/{jobId} {
+        allow read: if isOwner(userId);
+        // Writes happen via Cloud Functions with the Admin SDK.
+        allow write: if false;
+      }
+
+      // Notifications (delivered reminders, etc.).
+      match /notifications/{notifId} {
+        allow read, update: if isOwner(userId);
+        allow create, delete: if false;
+      }
+
+      // Connected social accounts — OAuth tokens live here.
+      // Clients cannot read or write; Admin SDK bypasses these rules.
+      match /socialAccounts/{platformId} {
+        allow read, write: if false;
+      }
+
+      // User-uploaded media assets (metadata; bytes live in Storage).
+      match /mediaAssets/{assetId} {
+        allow read, create, delete: if isOwner(userId);
+        allow update: if false;
+      }
+
+      // Scheduled posts — clients read and create, but only Functions
+      // can transition status (publishing / published / failed).
+      match /scheduledPosts/{postId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId)
+          && request.resource.data.status == 'scheduled';
+        allow update: if isOwner(userId)
+          && request.resource.data.status == 'cancelled'
+          && resource.data.status == 'scheduled';
+        allow delete: if false;
+      }
     }
 
-    // Public agent definitions (read-only to clients; writes via Functions)
+    // -------- PKCE store for social OAuth (deny all client access) --------
+    // Admin SDK (Cloud Functions) reads/writes oauthPkce/{nonce} with a
+    // 10-minute TTL field. Enable TTL cleanup in the Firebase Console
+    // on field `expiresAt`.
+    match /oauthPkce/{nonce} {
+      allow read, write: if false;
+    }
+
+    // -------- Agent catalog (signed-in read, functions-only write) --------
     match /agents/{agentId} {
       allow read: if isSignedIn();
       allow write: if false;
     }
 
-    // Default deny
+    // -------- Public service pricing catalog (read-only to all signed in) --
+    match /servicePricing/{pricingId} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
+    // -------- Default deny --------
     match /{document=**} {
       allow read, write: if false;
     }

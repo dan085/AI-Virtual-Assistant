@@ -13,7 +13,18 @@
   "hosting": {
     "public": "web/dist/web/browser",
     "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "predeploy": [
+      "npm --prefix web ci --no-audit --no-fund",
+      "npm --prefix web run build -- --configuration=production"
+    ],
+    "postdeploy": [
+      "node scripts/postdeploy.js"
+    ],
     "rewrites": [
+      {
+        "source": "/api/oauth/**",
+        "function": "oauthCallback"
+      },
       {
         "source": "/api/**",
         "function": "api"
@@ -22,16 +33,34 @@
         "source": "**",
         "destination": "/index.html"
       }
+    ],
+    "headers": [
+      {
+        "source": "**/*.@(js|css|woff2)",
+        "headers": [
+          { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+        ]
+      },
+      {
+        "source": "/index.html",
+        "headers": [
+          { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
+        ]
+      }
     ]
   },
   "firestore": {
     "rules": "firestore.rules",
     "indexes": "firestore.indexes.json"
   },
+  "storage": {
+    "rules": "storage.rules"
+  },
   "emulators": {
     "auth": { "port": 9099 },
     "functions": { "port": 5001 },
     "firestore": { "port": 8080 },
+    "storage": { "port": 9199 },
     "hosting": { "port": 5000 },
     "ui": { "enabled": true },
     "singleProjectMode": true

@@ -2,8 +2,9 @@ import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { setGlobalOptions } from 'firebase-functions/v2';
 import { getAdminApp } from './lib/admin';
 import { requireAuth, wrapError } from './lib/errors';
-import { ChatRequestSchema, runAgent } from './agent/agent';
+import { ChatRequestSchema, listAgents, runAgent } from './agent/agent';
 import { GEMINI_API_KEY } from './agent/genkit';
+import { SKILL_CATALOG } from './agent/tools';
 import {
   PublishRequestSchema,
   publishInstagramPost,
@@ -12,8 +13,15 @@ import {
   INSTAGRAM_ACCESS_TOKEN,
   INSTAGRAM_BUSINESS_ID,
 } from './instagram/client';
+import {
+  VIDEO_PROVIDER_SECRETS,
+  listProviders as listVideoProviders,
+} from './video/generator.registry';
+import {
+  IMAGE_PROVIDER_SECRETS,
+  listImageProviders,
+} from './image/generator.registry';
 
-// Initialize Admin SDK once on cold start.
 getAdminApp();
 
 setGlobalOptions({
@@ -23,13 +31,16 @@ setGlobalOptions({
 });
 
 /**
- * Callable function: chat with the AI agent (Gemini via Genkit).
+ * Callable: chat with the AI agent.
+ *
+ * Secrets: Gemini (for Genkit + Imagen), plus every video provider
+ * (the agent may call generateAiVideo during generation).
  */
 export const chatWithAgent = onCall(
   {
-    secrets: [GEMINI_API_KEY],
-    timeoutSeconds: 60,
-    memory: '512MiB',
+    secrets: [GEMINI_API_KEY, ...VIDEO_PROVIDER_SECRETS, ...IMAGE_PROVIDER_SECRETS],
+    timeoutSeconds: 180,
+    memory: '1GiB',
   },
   async (request) => {
     const uid = requireAuth(request.auth);
@@ -46,12 +57,13 @@ export const chatWithAgent = onCall(
 );
 
 /**
- * Callable function: publish an image + caption to Instagram.
+ * Callable: publish to the app-wide Instagram Business account (legacy,
+ * pre-OAuth path). Prefer `publishToSocial` for per-user flows.
  */
 export const publishToInstagram = onCall(
   {
     secrets: [INSTAGRAM_ACCESS_TOKEN, INSTAGRAM_BUSINESS_ID],
-    timeoutSeconds: 120,
+    timeoutSeconds: 540,
     memory: '512MiB',
   },
   async (request) => {
@@ -69,6 +81,50 @@ export const publishToInstagram = onCall(
 );
 
 /**
- * Simple health check (also serves as the hosting rewrite target at /api/health).
+ * Callable: list agents, skills, and available AI providers.
  */
+export const listAvailableAgents = onCall(
+  { timeoutSeconds: 20, memory: '256MiB' },
+  async (request) => {
+    requireAuth(request.auth);
+    try {
+      const agents = await listAgents();
+      return {
+        agents,
+        skills: Object.values(SKILL_CATALOG),
+        videoProviders: listVideoProviders(),
+        imageProviders: listImageProviders(),
+      };
+    } catch (err) {
+      wrapError(err, 'Failed to list agents');
+    }
+  },
+);
+
+// Scheduled
+export { processDueReminders } from './scheduled/process-reminders';
+export { processDueScheduledPosts } from './scheduled/process-scheduled-posts';
+
+// Scheduler (user-facing)
+export {
+  createScheduledPostCallable,
+  cancelScheduledPostCallable,
+} from './scheduler/endpoints';
+
+// Admin
+export {
+  adminUpdateAgent,
+  adminListAllAgents,
+} from './admin/endpoints';
+
+// Multi-platform social (Instagram / Twitter / TikTok) OAuth + publish
+export {
+  listSocialConnections,
+  startSocialOAuth,
+  disconnectSocial,
+  oauthCallback,
+  publishToSocial,
+} from './social/endpoints';
+
+// Generic HTTP
 export { api } from './api';

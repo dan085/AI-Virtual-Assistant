@@ -2,11 +2,20 @@ import { z } from 'zod';
 import { ai } from './genkit';
 import { db } from '../lib/admin';
 import { FieldValue } from 'firebase-admin/firestore';
+import { buildTools } from './tools';
+import type { ToolContext } from './tools';
+import {
+  AgentDefinition,
+  BUILTIN_AGENTS,
+  DEFAULT_AGENT_ID,
+  getBuiltinAgent,
+} from './registry';
+import type { SkillId } from './tools';
 
 export const ChatRequestSchema = z.object({
   conversationId: z.string().min(1).max(128),
   message: z.string().min(1).max(4000),
-  agentId: z.string().min(1).max(64).default('default'),
+  agentId: z.string().min(1).max(64).default(DEFAULT_AGENT_ID),
 });
 
 export type ChatRequest = z.infer<typeof ChatRequestSchema>;
@@ -14,34 +23,40 @@ export type ChatRequest = z.infer<typeof ChatRequestSchema>;
 export interface ChatResponse {
   conversationId: string;
   reply: string;
+  agentId: string;
+  agentDisplayName: string;
   usage?: { inputTokens?: number; outputTokens?: number };
+  toolCalls?: Array<{ name: string; input: unknown }>;
 }
 
-interface AgentConfig {
-  systemPrompt: string;
-  displayName: string;
-}
-
-const DEFAULT_AGENT: AgentConfig = {
-  displayName: 'Emma',
-  systemPrompt: [
-    'You are Emma, a helpful, friendly virtual assistant.',
-    'Answer concisely. When the user asks in Spanish, reply in Spanish.',
-    'When the user asks in English, reply in English.',
-    'If you are asked to publish to Instagram, explain that the user must',
-    'use the "Publish to Instagram" feature in the UI.',
-  ].join(' '),
-};
-
-async function loadAgentConfig(agentId: string): Promise<AgentConfig> {
-  if (agentId === 'default') return DEFAULT_AGENT;
-  const snap = await db().collection('agents').doc(agentId).get();
-  if (!snap.exists) return DEFAULT_AGENT;
-  const data = snap.data() ?? {};
-  return {
-    displayName: (data.displayName as string) ?? DEFAULT_AGENT.displayName,
-    systemPrompt: (data.systemPrompt as string) ?? DEFAULT_AGENT.systemPrompt,
-  };
+/**
+ * Load an agent definition. Tries Firestore first (for runtime
+ * customization), falls back to the in-code BUILTIN_AGENTS registry.
+ */
+async function loadAgent(agentId: string): Promise<AgentDefinition> {
+  try {
+    const snap = await db().collection('agents').doc(agentId).get();
+    if (snap.exists) {
+      const data = snap.data() ?? {};
+      // Merge Firestore overrides on top of the builtin default so missing
+      // fields fall through to sane values.
+      const base = getBuiltinAgent(agentId);
+      return {
+        ...base,
+        displayName: (data.displayName as string) ?? base.displayName,
+        tagline: (data.tagline as string) ?? base.tagline,
+        description: (data.description as string) ?? base.description,
+        systemPrompt: (data.systemPrompt as string) ?? base.systemPrompt,
+        skills: (data.skills as SkillId[]) ?? base.skills,
+        defaultLocale: (data.defaultLocale as 'es' | 'en') ?? base.defaultLocale,
+        published: (data.published as boolean) ?? base.published,
+      };
+    }
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn('[agent] Firestore load failed, using builtin', err);
+  }
+  return getBuiltinAgent(agentId);
 }
 
 async function loadHistory(
@@ -68,8 +83,10 @@ async function loadHistory(
 async function persistMessage(
   userId: string,
   conversationId: string,
+  agentId: string,
   role: 'user' | 'assistant',
   content: string,
+  toolCalls?: Array<{ name: string; input: unknown }>,
 ): Promise<void> {
   const convRef = db()
     .collection('users').doc(userId)
@@ -77,6 +94,7 @@ async function persistMessage(
 
   await convRef.set(
     {
+      agentId,
       updatedAt: FieldValue.serverTimestamp(),
       lastMessagePreview: content.slice(0, 200),
     },
@@ -86,6 +104,8 @@ async function persistMessage(
   await convRef.collection('messages').add({
     role,
     content,
+    agentId,
+    toolCalls: toolCalls ?? [],
     createdAt: FieldValue.serverTimestamp(),
   });
 }
@@ -94,13 +114,27 @@ export async function runAgent(
   userId: string,
   req: ChatRequest,
 ): Promise<ChatResponse> {
-  const agentConfig = await loadAgentConfig(req.agentId);
+  const agentDef = await loadAgent(req.agentId);
   const history = await loadHistory(userId, req.conversationId);
 
-  await persistMessage(userId, req.conversationId, 'user', req.message);
+  await persistMessage(
+    userId,
+    req.conversationId,
+    agentDef.id,
+    'user',
+    req.message,
+  );
+
+  const toolContext: ToolContext = {
+    uid: userId,
+    conversationId: req.conversationId,
+  };
+
+  const tools = buildTools(ai(), toolContext, agentDef.skills);
 
   const response = await ai().generate({
-    system: agentConfig.systemPrompt,
+    system: agentDef.systemPrompt,
+    tools,
     messages: [
       ...history.map((m) => ({
         role: m.role,
@@ -111,11 +145,36 @@ export async function runAgent(
   });
 
   const reply = response.text ?? '';
-  await persistMessage(userId, req.conversationId, 'assistant', reply);
+
+  // Best-effort extraction of tool calls for the audit trail.
+  const toolCalls: Array<{ name: string; input: unknown }> = [];
+  for (const msg of response.messages ?? []) {
+    for (const part of msg.content ?? []) {
+      if (part && typeof part === 'object' && 'toolRequest' in part) {
+        const tr = (part as { toolRequest?: { name?: string; input?: unknown } })
+          .toolRequest;
+        if (tr?.name) {
+          toolCalls.push({ name: tr.name, input: tr.input });
+        }
+      }
+    }
+  }
+
+  await persistMessage(
+    userId,
+    req.conversationId,
+    agentDef.id,
+    'assistant',
+    reply,
+    toolCalls,
+  );
 
   return {
     conversationId: req.conversationId,
     reply,
+    agentId: agentDef.id,
+    agentDisplayName: agentDef.displayName,
+    toolCalls: toolCalls.length ? toolCalls : undefined,
     usage: response.usage
       ? {
           inputTokens: response.usage.inputTokens,
@@ -123,4 +182,25 @@ export async function runAgent(
         }
       : undefined,
   };
+}
+
+/**
+ * Public listing of available agents (merges builtin + Firestore,
+ * hides unpublished). Used by the frontend agent picker.
+ */
+export async function listAgents(): Promise<
+  Array<Pick<AgentDefinition, 'id' | 'displayName' | 'tagline' | 'description' | 'skills'>>
+> {
+  const out: Array<Pick<AgentDefinition, 'id' | 'displayName' | 'tagline' | 'description' | 'skills'>> = [];
+  for (const def of Object.values(BUILTIN_AGENTS)) {
+    if (!def.published) continue;
+    out.push({
+      id: def.id,
+      displayName: def.displayName,
+      tagline: def.tagline,
+      description: def.description,
+      skills: def.skills,
+    });
+  }
+  return out;
 }

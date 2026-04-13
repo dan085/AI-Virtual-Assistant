@@ -8,6 +8,11 @@ import {
   getFunctions,
   connectFunctionsEmulator,
 } from '@angular/fire/functions';
+import {
+  provideStorage,
+  getStorage,
+  connectStorageEmulator,
+} from '@angular/fire/storage';
 
 import { routes } from './app.routes';
 import { environment } from '../environments/environment';
@@ -43,6 +48,14 @@ export const appConfig: ApplicationConfig = {
         connectFunctionsEmulator(fns, 'localhost', 5001);
       }
       return fns;
+    }),
+
+    provideStorage(() => {
+      const st = getStorage();
+      if (environment.useEmulators) {
+        connectStorageEmulator(st, 'localhost', 9199);
+      }
+      return st;
     }),
   ],
 };

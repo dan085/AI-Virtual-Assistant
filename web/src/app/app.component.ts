@@ -15,8 +15,18 @@ import { AuthService } from './core/auth.service';
         @if (auth.user()) {
           <nav>
             <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">Dashboard</a>
+            <a routerLink="/agents" routerLinkActive="active">Agents</a>
             <a routerLink="/chat" routerLinkActive="active">Chat</a>
+            <a routerLink="/media" routerLinkActive="active">Media</a>
+            <a routerLink="/videos" routerLinkActive="active">AI videos</a>
+            <a routerLink="/scheduler" routerLinkActive="active">Scheduler</a>
             <a routerLink="/instagram" routerLinkActive="active">Instagram</a>
+            <a routerLink="/connections" routerLinkActive="active">Connections</a>
+            <a routerLink="/tickets" routerLinkActive="active">Tickets</a>
+            <a routerLink="/analytics" routerLinkActive="active">Analytics</a>
+            @if (auth.isAdmin()) {
+              <a routerLink="/admin/agents" routerLinkActive="active">Admin</a>
+            }
           </nav>
           <button class="signout" (click)="auth.signOut()">Sign out</button>
         } @else {
